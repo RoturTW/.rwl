@@ -112,7 +112,7 @@ class AstNode {
         return `Node<${this.kind}>{${{
             block: () => `header:${this.data.header.stringify()},contents:${this.data.content.stringify()}`,
             element: () => `value:${this.data.value.stringify()},attributes:[${this.data.attributes.map(a => a.stringify()).join(",")}]`,
-        }[this.kind] ?? this.data.toString().trim()}}`
+        }[this.kind]() ?? this.data.toString().trim()}}`
     }
     parse(code) {
         if (code.trim() === "") {
@@ -216,7 +216,7 @@ class AstValue {
         throw Error("Unknown value syntax: " + code);
     }
     stringify() {
-        return `Value<${this.type}>${data ?? "" !== "" ? `{${{
+        return `Value<${this.type}>${this.data ?? "" !== "" ? `{${{
             str: () => this.value,
             num: () => this.value.toString(),
             percentage: () => this.value.toString() + "%",
