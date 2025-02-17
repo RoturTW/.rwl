@@ -78,21 +78,10 @@ function split(text, type, name) {
     return tokens;
 }
 
-function splitBlock(text) {
-    return split(text, "curly", "block");
-}
-
-function splitHeader(text) {
-    return split(text, "square", "header");
-}
-
-function splitSegment(text) {
-    return split(text, ",");
-}
-
-function splitKey(text) {
-    return split(text, "=");
-}
+const splitBlock = (text) => split(text, "curly", "block");
+const splitHeader = (text) => split(text, "square", "header");
+const splitSegment = (text) => split(text, ",");
+const splitKey = (text) => split(text, "=");
 
 const removeStr = (str) => str.replace(/\\(.)|["'`]/g, (match, escaped) => escaped || '');
 const removeComments = (str) => str.replace(/(["'`])(?:(?=(\\?))\2.)*?\1|\/\/.*|\/\*[\s\S]*?\*\//g,((t,e)=>e?t:""))
@@ -140,9 +129,6 @@ class AstNode {
                 break;
         }
         return `Node<${this.kind}>{${contents}}`
-    }
-    static unknown(code) {
-        return new AstNode("unknown", code);
     }
     parse(code) {
         if (code.trim() === "") {
