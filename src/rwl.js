@@ -1,7 +1,3 @@
-
-const blockCache = {};
-const segmentCache = {};
-
 function split(text, type, name) {
     let text2 = text.split("\n").filter(t => t !== "").join("\n");
     text = text.trim();
@@ -83,19 +79,16 @@ const splitHeader = (text) => split(text, "square", "header");
 const splitSegment = (text) => split(text, ",");
 const splitKey = (text) => split(text, "=");
 
-const removeStr = (str) => str.replace(/\\(.)|["'`]/g, (match, escaped) => escaped || '');
+const removeStr = (str) => str.replace(/\\(.)|["'`]/g, (_match, escaped) => escaped || '');
 const removeComments = (str) => str.replace(/(["'`])(?:(?=(\\?))\2.)*?\1|\/\/.*|\/\*[\s\S]*?\*\//g,((t,e)=>e?t:""))
 
 class AstSegment {
     constructor(code = null) {
         this.elements = [];
-        if (code) {
-            this.parse(code);
-        }
+        this.parse(code ?? "");
     }
     parse(code) {
-        const elements = splitSegment(removeComments(code));
-        this.elements = elements.map(n => new AstNode(n));
+        this.elements = splitSegment(removeComments(code)).map(n => new AstNode(n));
     }
     stringify() {
         return `Segment{${this.elements.map(n => n.stringify()).join(",")}}`
@@ -116,19 +109,10 @@ class AstNode {
         this.parse(code);
     }
     stringify() {
-        let contents = "";
-        switch (this.kind) {
-            case "block":
-                contents = `header:${this.data.header.stringify()},contents:${this.data.content.stringify()}`;
-                break;
-            case "element":
-                contents = `value:${this.data.value.stringify()},attributes:[${this.data.attributes.map(a => a.stringify()).join(",")}]`;
-                break;
-            case "unknown":
-                contents = this.data.trim();
-                break;
-        }
-        return `Node<${this.kind}>{${contents}}`
+        return `Node<${this.kind}>{${{
+            block: () => `header:${this.data.header.stringify()},contents:${this.data.content.stringify()}`,
+            element: () => `value:${this.data.value.stringify()},attributes:[${this.data.attributes.map(a => a.stringify()).join(",")}]`,
+        }[this.kind] ?? this.data.toString().trim()}}`
     }
     parse(code) {
         if (code.trim() === "") {
@@ -160,19 +144,16 @@ class AstNode {
 
 class AstHeader {
     constructor(code = "") {
+        this.attributes = [];
         this.parse(code);
     }
     parse(code) {
         const header = splitHeader(code);
 
-        this.attributes = [];
-
-        if (header.length == 2) {
-            const attributes = splitSegment(header[1]);
-            this.attributes = attributes.map(a => new AstAttribute(a))
-        }
-
         this.key = header[0];
+        if (header.length == 2) {
+            this.attributes = splitSegment(header[1]).map(a => new AstAttribute(a));
+        }
     }
     stringify() {
         return `Header<${this.key}>${this.attributes.length > 0 ? "{" + this.attributes.map(a => a.stringify()).join(",") + "}" : ""}`;
@@ -206,11 +187,9 @@ class AstAttribute {
 
 class AstValue {
     constructor(code = "") {
-        this.parse(code);
+        this.parse(code.trim());
     }
     parse(code) {
-        code = code.trim();
-        
         if (
             (code[0] === "\"" && code[code.length-1] === "\"") || 
             (code[0] === "'" && code[code.length-1] === "'") || 
@@ -221,17 +200,14 @@ class AstValue {
             return;
         }
         
-        const num = Number(code);
+        const num = Number(code.replace("%",""));
         if (!isNaN(num)) {
-            this.type = "num";
-            this.value = num;
-            return;
-        }
-
-        if (code[code.length-1] == "%") {
-            const num = Number(code.slice(0,-1));
-            if (!isNaN(num)) {
+            if (code[code.length-1] == "%") {
                 this.type = "percentage";
+                this.value = num;
+                return;
+            } else {
+                this.type = "num";
                 this.value = num;
                 return;
             }
@@ -240,19 +216,11 @@ class AstValue {
         throw Error("Unknown value syntax: " + code);
     }
     stringify() {
-        let data = null;
-        switch (this.type) {
-            case "str":
-                data = this.value;
-                break;
-            case "num":
-                data = this.value.toString();
-                break;
-            case "percentage":
-                data = this.value.toString() + "%";
-                break;
-        }
-        return `Value<${this.type}>${data ?? "" !== "" ? `{${data}}` : ""}`;
+        return `Value<${this.type}>${data ?? "" !== "" ? `{${{
+            str: () => this.value,
+            num: () => this.value.toString(),
+            percentage: () => this.value.toString() + "%",
+        }[this.type]()}}` : ""}`;
     }
 }
 
