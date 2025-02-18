@@ -79,7 +79,7 @@ const splitHeader = (text) => split(text, "square", "header");
 const splitSegment = (text) => split(text, ",");
 const splitKey = (text) => split(text, "=");
 
-const removeStr = (str) => str.replace(/\\(.)|["'`]/g, (_match, escaped) => escaped || '');
+const removeStr = (str) => str.replace(/\\(.)|["'`]/g, (_match, escaped) => escaped === 'n' ? '\n' : escaped || '');
 const removeComments = (str) => str.replace(/(["'`])(?:(?=(\\?))\2.)*?\1|\/\/.*|\/\*[\s\S]*?\*\//g,((t,e)=>e?t:""))
 
 class AstSegment {
@@ -92,6 +92,10 @@ class AstSegment {
     }
     stringify() {
         return `Segment{${this.elements.map(n => n.stringify()).join(",")}}`
+    }
+    solve(frame) {
+        frame ??= Frame.zero();
+        return this.elements.map(e => e ? e.solve(frame) : null);
     }
 }
 
@@ -140,7 +144,13 @@ class AstNode {
         };
         return;
     }
+    solve(frame) {
+        frame ??= Frame.zero();
+        console.log(frame.getAlignment(""));
+        console.log(this);
+    }
 }
+
 
 class AstHeader {
     constructor(code = "") {
@@ -216,7 +226,7 @@ class AstValue {
         throw Error("Unknown value syntax: " + code);
     }
     stringify() {
-        return `Value<${this.type}>${this.data ?? "" !== "" ? `{${{
+        return `Value<${this.type}>${this.value ?? "" !== "" ? `{${{
             str: () => this.value,
             num: () => this.value.toString(),
             percentage: () => this.value.toString() + "%",
@@ -233,25 +243,107 @@ class AstScriptSegment {
     }
 }
 
+class Frame {
+    constructor(a,b) {
+        this.a = Vec2.toVec(a) ?? Vec2.zero();
+        this.b = Vec2.toVec(b) ?? Vec2.zero();
+        this.update();
+    }
+    update() {
+        this.size = this.getSize();
+    }
+
+    getCenter() {
+        return new Vec2((this.a.x + this.b.x) * .5, (this.a.y + this.b.y) * .5);
+    }
+    getSize() {
+        return new Vec2(this.b.x - this.a.x, this.b.y - this.a.y);
+    }
+
+    getAlignment(alignmentName, padding) {
+        const alignments = {
+            "top": new Vec2(0,1), "t": new Vec2(0,1),
+            "bottom": new Vec2(0,-1), "b": new Vec2(0,-1),
+            "left": new Vec2(-1,0), "l": new Vec2(-1,0),
+            "right": new Vec2(1,0), "r": new Vec2(1,0),
+            "top left": new Vec2(-1,1), "tl": new Vec2(-1,1),
+            "top right": new Vec2(1,1), "tr": new Vec2(1,1),
+            "bottom left": new Vec2(-1,-1), "bl": new Vec2(-1,-1),
+            "bottom right": new Vec2(1,-1), "br": new Vec2(1,-1),
+            "center": Vec2.zero(), "c": Vec2.zero(),
+        }
+
+        const alignment = alignments[alignmentName];
+        if (!alignment) throw Error("unknown alignment \"" + alignmentName.toString() + "\"")
+        padding ??= 0;
+
+        const vecPadding = new Vec2(alignment.x * padding, alignment.y * padding);
+        const size = this.getSize();
+        const position = this.getCenter();
+        
+        return new Vec2(
+            size.x * alignment.x + position.x - vecPadding.x,
+            size.y * alignment.y + position.y - vecPadding.y
+        );
+    }
+
+    static zero() {
+        return new Frame();
+    }
+}
+class Vec2 {
+    constructor(x,y) {
+        this.x = x ?? 0;
+        this.y = y ?? 0;
+    }
+    static toVec(v) {
+        if (!v) return Vec2.zero();
+
+        if (v instanceof Vec2)
+            return v;
+        if (Array.isArray(v))
+            return new Vec2(v[0],v[1]);
+        if (typeof v === "object")
+            return new Vec2(v["x"],v["y"]);
+        
+        throw Error("cannot make " + typeof v + " a vec2: " + JSON.stringify(v));
+    }
+    static zero() {
+        return new Vec2();
+    }
+}
+
+class RWL {
+    constructor (data) {
+        if (typeof data !== "object" && Array.isArray(data)) data = {}
+
+        const code = data["code"] ?? "";
+        this.ast = new Ast(code);
+
+        this.frame ??= data["frame"] ?? Frame.zero();
+
+        this.solved = this.solve(this.frame);
+    }
+    stringify() {
+        return `RWL{ast:${this.ast.stringify()}}`;
+    }
+    getObject() {
+        return JSON.parse(JSON.stringify(this));
+    }
+    solve(frame) {
+        frame ??= Frame.zero();
+        return this.ast.solve(frame);
+    }
+}
+
 const code = `
 root {
-    "rwl based website :D" [id = "myID"],
-    frame [direction = "horizontal"] {
-        section [scale = 100] {
-            ":3"
-        },
-        section [scale = 50%] {
-            "wow"
-        },
-        section {
-            "crazy"
-        }
-    },
-    script [type="rtr",interval=5] {
-        log("hi")
-    }
+    "hi"
 }
 `
 
-const ast = new Ast(code);
-console.log(ast.stringify());
+const rwl = new RWL({
+    code: code,
+    frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
+})
+console.log(rwl.solved);
