@@ -95,7 +95,15 @@ class AstSegment {
     }
     solve(frame) {
         frame ??= Frame.zero();
-        return this.elements.map(e => e ? e.solve(frame) : null);
+        let lastEnt = null;
+        return this.elements.map(e => {
+            let solved = e.solve(frame, lastEnt);
+            lastEnt = e ? solved : lastEnt;
+            return e ? solved : null;
+        });
+    }
+    getPanel(frame) {
+        return this.solve(frame).map(e => AstNode.getPanel(e, false));
     }
 }
 
@@ -115,7 +123,7 @@ class AstNode {
     stringify() {
         return `Node<${this.kind}>{${{
             block: () => `header:${this.data.header.stringify()},contents:${this.data.content.stringify()}`,
-            element: () => `value:${this.data.value.stringify()},attributes:[${this.data.attributes.map(a => a.stringify()).join(",")}]`,
+            element: () => `header:${this.data.header.stringify("element")},value:${this.data.value.stringify()}`,
         }[this.kind]() ?? this.data.toString().trim()}}`
     }
     parse(code) {
@@ -136,18 +144,73 @@ class AstNode {
             };
             return;
         }
-        const value = new AstValue(header.key);
+        const value = new AstValue(header.key, null, code);
         this.kind = "element";
         this.data = {
             value: value,
-            attributes: header.attributes
+            header: header
         };
         return;
     }
-    solve(frame) {
+    solve(frame, last) {
         frame ??= Frame.zero();
-        console.log(frame.getAlignment(""));
-        console.log(this);
+        let data = {};
+        const headerData = this.data.header.getData();
+        if (this.data.content) {
+            data["content"] = this.data.content.solve(frame);
+            data["type"] = headerData.key;
+        } else {
+            const size = AstValue.expect("num", headerData.data.size, new AstValue("num",10), "size").value;
+            const spacing = AstValue.expect("num", headerData.data.spacing, new AstValue("num",1), "spacing").value;
+            const line_height = AstValue.expect("num", headerData.data.line_height, new AstValue("num",1), "line_height").value;
+            const anchor = AstValue.expect("str", headerData.data.anchor, new AstValue("str","c"), "anchor").value;
+            const alignment = AstValue.expect("str", headerData.data.alignment, new AstValue("str","c"), "alignment").value;
+            const padding = AstValue.expect("num", headerData.data.padding, new AstValue("num",10), "padding").value;
+
+            const text = this.data.value.format();
+            const width = text.split("\n").reduce((max, str) => Math.max(max, str.length), 0) * size * spacing;
+            const height = text.split("\n").length * size * 2.3 * line_height;
+
+            const position = this.getAlignment(alignment, frame.getAnchor(anchor, padding), new Vec2(width, height));
+            data["position"] = position;
+            data["data"] = this.data.value.toObj();
+            data["size"] = size;
+        }
+
+        return data;
+    }
+    static getPanel(e, isntRoot = false) {
+        if (e["data"]) {
+            const type = e.data["type"],
+                value = e.data["value"];
+            
+            let data = 
+                type == "str" ? value :
+                "?";
+            return {"id":"text","text":data,"pos":[e.position.x,e.position.y],"size":e.size};
+        }
+        if (e["content"] && (!isntRoot || type === "root")) {
+            return {"id":"panel","panel":e["content"].map(e => AstNode.getPanel(e)),"pos":[0,0],"size":1};
+        }
+        return e;
+    }
+
+
+    getAlignment(alignmentName, position, size) {
+        const alignment = AstNode.getAlignments()[alignmentName];
+        if (!alignment) throw Error("unknown alignment \"" + alignmentName.toString() + "\"")
+        position ??= Vec2.zero();
+        size ??= Vec2.zero();
+        return new Vec2(
+            size.x * alignment.x * .5 + position.x,
+            size.y * alignment.y * .5 + position.y
+        );
+    }
+    
+    static getAlignments() {
+        return Object.fromEntries(
+            Object.entries(Frame.getAnchors()).map(([key, value]) => [key, new Vec2(value.x * -1,value.y * -1)]) // Modify values as needed
+        );
     }
 }
 
@@ -165,8 +228,21 @@ class AstHeader {
             this.attributes = splitSegment(header[1]).map(a => new AstAttribute(a));
         }
     }
-    stringify() {
+    stringify(type="block") {
+        if (type === "element")
+            return `Header${this.attributes.length > 0 ? "{" + this.attributes.map(a => a.stringify()).join(",") + "}" : ""}`;
         return `Header<${this.key}>${this.attributes.length > 0 ? "{" + this.attributes.map(a => a.stringify()).join(",") + "}" : ""}`;
+    }
+    getData() {
+        let out = {"data":{},"flags":[],"key":this.key};
+        for (let i = 0; i < this.attributes.length; i++) {
+            const attr = this.attributes[i];
+            if (attr["kind"] == "key")
+                out["data"][attr["key"]] = attr["value"];
+            if (attr["kind"] == "attr")
+                out["flags"].push(attr["data"]);
+        }
+        return out;
     }
 }
 
@@ -180,7 +256,7 @@ class AstAttribute {
         if (tokens.length == 2) {
             this.kind = "key";
             this.key = tokens[0].trim();
-            this.value = new AstValue(tokens[1]);
+            this.value = new AstValue(tokens[1], null, code);
             return;
         }
         if (/^[A-Za-z0-9_]+$/.test(code)) {
@@ -196,7 +272,13 @@ class AstAttribute {
 }
 
 class AstValue {
-    constructor(code = "") {
+    constructor(code = "", value = null, code2 = null) {
+        if (value) {
+            this.type = code;
+            this.value = value;
+            return;
+        }
+        this.code = code2 ? code2 : code;
         this.parse(code.trim());
     }
     parse(code) {
@@ -232,6 +314,15 @@ class AstValue {
             percentage: () => this.value.toString() + "%",
         }[this.type]()}}` : ""}`;
     }
+    format() {
+        return this.value.toString();
+    }
+    toObj() {
+        return {type:this.type,value:this.value};
+    }
+    static expect(type,value,defaultValue,name) {
+        return value ? ((value.type === type || type === "any") ? value : (() => { throw Error(`expected ${type} got ${value.type} ${name ? `for ${name}` : ""} ${value.code ? `in ${value.code}` : ""}`) })()) : defaultValue;
+    }
 }
 
 class AstScriptSegment {
@@ -260,8 +351,26 @@ class Frame {
         return new Vec2(this.b.x - this.a.x, this.b.y - this.a.y);
     }
 
-    getAlignment(alignmentName, padding) {
-        const alignments = {
+    getAnchor(anchorName, padding) {
+        const anchor = Frame.getAnchors()[anchorName];
+        if (!anchor) throw Error("unknown anchor \"" + anchorName.toString() + "\"")
+        padding ??= 0;
+
+        const vecPadding = new Vec2(anchor.x * padding, anchor.y * padding);
+        const size = this.getSize();
+        const position = this.getCenter();
+        
+        return new Vec2(
+            size.x * anchor.x * .5 + position.x - vecPadding.x,
+            size.y * anchor.y * .5 + position.y - vecPadding.y
+        );
+    }
+
+    static zero() {
+        return new Frame();
+    }
+    static getAnchors() {
+        return {
             "top": new Vec2(0,1), "t": new Vec2(0,1),
             "bottom": new Vec2(0,-1), "b": new Vec2(0,-1),
             "left": new Vec2(-1,0), "l": new Vec2(-1,0),
@@ -271,24 +380,7 @@ class Frame {
             "bottom left": new Vec2(-1,-1), "bl": new Vec2(-1,-1),
             "bottom right": new Vec2(1,-1), "br": new Vec2(1,-1),
             "center": Vec2.zero(), "c": Vec2.zero(),
-        }
-
-        const alignment = alignments[alignmentName];
-        if (!alignment) throw Error("unknown alignment \"" + alignmentName.toString() + "\"")
-        padding ??= 0;
-
-        const vecPadding = new Vec2(alignment.x * padding, alignment.y * padding);
-        const size = this.getSize();
-        const position = this.getCenter();
-        
-        return new Vec2(
-            size.x * alignment.x + position.x - vecPadding.x,
-            size.y * alignment.y + position.y - vecPadding.y
-        );
-    }
-
-    static zero() {
-        return new Frame();
+        };
     }
 }
 class Vec2 {
@@ -331,19 +423,30 @@ class RWL {
         return JSON.parse(JSON.stringify(this));
     }
     solve(frame) {
+        frame ??= this.frame;
         frame ??= Frame.zero();
         return this.ast.solve(frame);
+    }
+    getPanel(frame) {
+        frame ??= this.frame;
+        frame ??= Frame.zero();
+        return this.ast.getPanel(frame);
     }
 }
 
 const code = `
 root {
-    "hi"
+    "silly"
 }
 `
 
-const rwl = new RWL({
-    code: code,
-    frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
-})
-console.log(rwl.solved);
+// is being run directly
+if (require.main === module) {
+    const rwl = new RWL({
+        code: code,
+        frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
+    })
+    //console.log(rwl.ast.stringify());
+    console.log(JSON.stringify(rwl.getPanel(),null,"  "));
+}
+module.exports = { RWL, Frame, Vec2 }
