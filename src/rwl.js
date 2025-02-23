@@ -190,7 +190,7 @@ class AstNode {
             return {"id":"text","text":data,"pos":[e.position.x,e.position.y],"size":e.size};
         }
         if (e["content"] && (!isntRoot || type === "root")) {
-            return {"id":"panel","panel":e["content"].map(e => AstNode.getPanel(e)),"pos":[0,0],"size":1};
+            return {"id":"panel","panel":e.content.map(e => AstNode.getPanel(e)),"pos":[0,0],"size":1};
         }
         return e;
     }
