@@ -46,6 +46,8 @@ function split(text, type, name) {
         
         if (char === open && curlyDepth == (type == "curly" ? 1 : 0) && squareDepth == (type == "square" ? 1 : 0) && !hasSplit) {
             tokens.push(current.trim());
+            if (text[i+1] == close)
+                tokens.push("");
             current = "";
             continue;
         }
@@ -157,8 +159,23 @@ class AstNode {
         let data = {};
         const headerData = this.data.header.getData();
         if (this.data.content) {
+            if (headerData.key === "frame") {
+                const Axes = [];
+                for (let i = 0; i < headerData.flags.length; i++) {
+                    const flag = headerData.flags[i];
+                    if (["Horizontal","Vertical"].includes(flag)) {
+                        Axes.push({"Horizontal":"x","Vertical":"y"}[flag])
+                    } else {
+                        throw Error("unexpected flag " + flag);
+                    }
+                }
+                if (!Axes.length) Axes.push("x");
+                console.log(Axes);
+            }
             data["content"] = this.data.content.solve(frame);
             data["type"] = headerData.key;
+            data["flags"] = headerData.flags;
+            data["keys"] = headerData.data;
         } else {
             const size = AstValue.expect("num", headerData.data.size, new AstValue("num",10), "size").value;
             const spacing = AstValue.expect("num", headerData.data.spacing, new AstValue("num",1), "spacing").value;
@@ -166,30 +183,40 @@ class AstNode {
             const anchor = AstValue.expect("str", headerData.data.anchor, new AstValue("str","c"), "anchor").value;
             const alignment = AstValue.expect("str", headerData.data.alignment, new AstValue("str","c"), "alignment").value;
             const padding = AstValue.expect("num", headerData.data.padding, new AstValue("num",10), "padding").value;
+            const isPositioned = headerData.data.anchor || headerData.data.padding;
 
             const text = this.data.value.format();
             const width = text.split("\n").reduce((max, str) => Math.max(max, str.length), 0) * size * spacing;
             const height = text.split("\n").length * size * 2.3 * line_height;
 
-            const position = this.getAlignment(alignment, frame.getAnchor(anchor, padding), new Vec2(width, height));
+            const position = isPositioned || !(last && last["nextPos"]) ? this.getAlignment(alignment, frame.getAnchor(anchor, padding), new Vec2(width, height)) : last["nextPos"];
             data["position"] = position;
             data["data"] = this.data.value.toObj();
             data["size"] = size;
+            data["width"] = width;
+            data["height"] = height;
+            data["line_height"] = line_height;
+            const lines = AstValue.toStr(this.data.value).split("\n");
+            const lineCount = lines.length;
+            data["nextPos"] = new Vec2(position.x + (lines[lines.length-1].length) * size * spacing, position.y - ((lineCount - 1) * line_height * size * 2.3))
         }
 
         return data;
     }
     static getPanel(e, isntRoot = false) {
         if (e["data"]) {
-            const type = e.data["type"],
-                value = e.data["value"];
-            
-            let data = 
-                type == "str" ? value :
-                "?";
-            return {"id":"text","text":data,"pos":[e.position.x,e.position.y],"size":e.size};
+            const data = AstValue.toStr(e.data);
+            const lines = data.split("\n");
+            const x = e.position.x - (e.width * .5);
+            const panelLines = [];
+            for (let i = 0; i < lines.length; i++) {
+                const l = lines[i];
+                panelLines.push({"id":"text","text":l,"pos":[x,e.position.y - (i * e.line_height * e.size * 2.3)],"size":e.size});
+            }
+            if (panelLines.length == 1) return panelLines[0];
+            return {"id":"panel","panel":panelLines,"pos":[0,0],"size":1};
         }
-        if (e["content"] && (!isntRoot || type === "root")) {
+        if (e["content"] && (!isntRoot || e.type === "root")) {
             return {"id":"panel","panel":e.content.map(e => AstNode.getPanel(e)),"pos":[0,0],"size":1};
         }
         return e;
@@ -239,7 +266,7 @@ class AstHeader {
             const attr = this.attributes[i];
             if (attr["kind"] == "key")
                 out["data"][attr["key"]] = attr["value"];
-            if (attr["kind"] == "attr")
+            if (attr["kind"] == "flag")
                 out["flags"].push(attr["data"]);
         }
         return out;
@@ -319,6 +346,15 @@ class AstValue {
     }
     toObj() {
         return {type:this.type,value:this.value};
+    }
+    static toStr(v) {
+        const type = v.type,
+            value = v.value;
+        return (
+            type == "str" ? value :
+            type == "num" ? value.toString() :
+            "?"
+        );
     }
     static expect(type,value,defaultValue,name) {
         return value ? ((value.type === type || type === "any") ? value : (() => { throw Error(`expected ${type} got ${value.type} ${name ? `for ${name}` : ""} ${value.code ? `in ${value.code}` : ""}`) })()) : defaultValue;
@@ -436,7 +472,13 @@ class RWL {
 
 const code = `
 root {
-    "silly"
+    frame [Horizontal] {
+        section [size=50%] {},
+        section [width=70%] {},
+        section {
+            "hi"
+        }
+    }
 }
 `
 
