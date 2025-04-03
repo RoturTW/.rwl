@@ -95,11 +95,11 @@ class AstSegment {
     stringify() {
         return `Segment{${this.elements.map(n => n.stringify()).join(",")}}`
     }
-    solve(frame) {
+    solve(frame, extData) {
         frame ??= Frame.zero();
         let lastEnt = null;
         return this.elements.map(e => {
-            let solved = e.solve(frame, lastEnt);
+            let solved = e.solve(frame, lastEnt, extData);
             lastEnt = e ? solved : lastEnt;
             return e ? solved : null;
         });
@@ -154,11 +154,12 @@ class AstNode {
         };
         return;
     }
-    solve(frame, last) {
+    solve(frame, last, inData) {
         frame ??= Frame.zero();
         let data = {};
         const headerData = this.data.header.getData();
         if (this.data.content) {
+            let extData = undefined;
             if (headerData.key === "frame") {
                 const Axes = [];
                 for (let i = 0; i < headerData.flags.length; i++) {
@@ -170,9 +171,21 @@ class AstNode {
                     }
                 }
                 if (!Axes.length) Axes.push("x");
-                console.log(Axes);
+                extData = {"axes":Axes};
             }
-            data["content"] = this.data.content.solve(frame);
+            if (headerData.key === "section") {
+                if (inData && inData["axes"]) {
+                    const sizeP = AstValue.expect("num", headerData.data.size, new AstValue("num",100), "size").value;
+                    const widthP = AstValue.expect("num", headerData.data.width, new AstValue("num",100), "width").value;
+                    const heightP = AstValue.expect("num", headerData.data.height, new AstValue("num",100), "height").value;
+                    
+                    const width = !inData["axes"].length ? sizeP : widthP;
+                    const height = !inData["axes"].length ? sizeP : heightP;
+                } else {
+                    throw Error("section outside frame");
+                }
+            }
+            data["content"] = this.data.content.solve(frame, extData);
             data["type"] = headerData.key;
             data["flags"] = headerData.flags;
             data["keys"] = headerData.data;
