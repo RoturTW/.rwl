@@ -175,12 +175,50 @@ class AstNode {
             }
             if (headerData.key === "section") {
                 if (inData && inData["axes"]) {
-                    const sizeP = AstValue.expect("num", headerData.data.size, new AstValue("num",100), "size").value;
-                    const widthP = AstValue.expect("num", headerData.data.width, new AstValue("num",100), "width").value;
-                    const heightP = AstValue.expect("num", headerData.data.height, new AstValue("num",100), "height").value;
+                    const sizeP = AstValue.expect(["num","percentage"], headerData.data.size, null, "size");
+                    const widthP = AstValue.expect(["num","percentage"], headerData.data.width, null, "width");
+                    const heightP = AstValue.expect(["num","percentage"], headerData.data.height, null, "height");
                     
-                    const width = !inData["axes"].length ? sizeP : widthP;
-                    const height = !inData["axes"].length ? sizeP : heightP;
+                    const fSize = frame.getSize();
+                    const width = !inData["axes"].length ? sizeP : (inData["axes"].includes("x") ? (widthP ?? sizeP) : null);
+                    const height = !inData["axes"].length ? sizeP : (inData["axes"].includes("y") ? (heightP ?? sizeP) : null);
+                    const inFrame = frame.clone();
+                    if (width && inData["axes"].includes("x")) {
+                        let change = 0;
+                        if (width.type == "num")
+                            change = width.value;
+                        if (width.type == "percentage")
+                            change = (frame.b.x - frame.a.x) * (width.value * .01);
+                        
+                        inFrame.b.x = frame.a.x + change;
+                        inFrame.update()
+                        frame.a.x += change;
+                        frame.update();
+                    }
+                    if (height && inData["axes"].includes("y")) {
+                        let change = 0;
+                        if (height.type == "num")
+                            change = height.value;
+                        if (height.type == "percentage")
+                            change = (frame.b.y - frame.a.y) * (height.value * .01);
+                        
+                        inFrame.b.y = inFrame.a.y + change;
+                        inFrame.update()
+                        frame.a.y += change;
+                        frame.update();
+                    }
+
+                    console.log(inFrame);
+                    data["inFrame"] = inFrame;
+                    data["frame"] = frame;
+
+
+                    data["content"] = this.data.content.solve(inFrame, extData);
+                    data["type"] = headerData.key;
+                    data["flags"] = headerData.flags;
+                    data["keys"] = headerData.data;
+
+                    return data;
                 } else {
                     throw Error("section outside frame");
                 }
@@ -370,7 +408,7 @@ class AstValue {
         );
     }
     static expect(type,value,defaultValue,name) {
-        return value ? ((value.type === type || type === "any") ? value : (() => { throw Error(`expected ${type} got ${value.type} ${name ? `for ${name}` : ""} ${value.code ? `in ${value.code}` : ""}`) })()) : defaultValue;
+        return value ? ((Array.isArray(type) ? type.includes(value.type) : (value.type === type || type === "any")) ? value : (() => { throw Error(`expected ${Array.isArray(type) ? type.join(" or ") : type} got ${value.type} ${name ? `for ${name}` : ""} ${value.code ? `in ${value.code}` : ""}`) })()) : defaultValue;
     }
 }
 
@@ -398,6 +436,13 @@ class Frame {
     }
     getSize() {
         return new Vec2(this.b.x - this.a.x, this.b.y - this.a.y);
+    }
+
+    clone() {
+        return new Frame(
+            new Vec2(this.a.x, this.a.y),
+            new Vec2(this.b.x, this.b.y)
+        )
     }
 
     getAnchor(anchorName, padding) {
@@ -486,10 +531,8 @@ class RWL {
 const code = `
 root {
     frame [Horizontal] {
-        section [size=50%] {},
-        section [width=70%] {},
-        section {
-            "hi"
+        section [width=100] {
+          "hi"
         }
     }
 }
@@ -502,6 +545,6 @@ if (require.main === module) {
         frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
     })
     //console.log(rwl.ast.stringify());
-    console.log(JSON.stringify(rwl.getPanel(),null,"  "));
+    console.log(JSON.stringify(rwl.getPanel(rwl.frame),null,"  "),JSON.stringify(rwl.solved,null,"  "));
 }
 module.exports = { RWL, Frame, Vec2 }
