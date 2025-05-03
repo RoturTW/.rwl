@@ -537,8 +537,6 @@ root {
 }
 `
 
-console.log(split("hi wow crazy [nuh uh]","square"))
-
 // is being run directly
 if (require.main === module) {
     const rwl = new RWL({
@@ -546,6 +544,6 @@ if (require.main === module) {
         frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
     })
     //console.log(rwl.ast.stringify());
-    //console.log(JSON.stringify(rwl.getPanel(rwl.frame),null,"  "),JSON.stringify(rwl.ast,null,"  "));
+    console.log(JSON.stringify(rwl.getPanel(rwl.frame),null,"  "),JSON.stringify(rwl.ast,null,"  "));
 }
 module.exports = { RWL, Frame, Vec2 }
