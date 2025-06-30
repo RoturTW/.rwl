@@ -585,7 +585,7 @@ root {
                         section [size=50%] {
                         
                         },
-                        section {
+                        section [size=50%] {
                         }
                     }
                 },
