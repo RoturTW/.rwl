@@ -137,28 +137,34 @@ class AstNode {
         
         const block = splitBlock(code);
         const header = new AstHeader(block[0]);
-        if (block.length == 2) {
-            const content = header.key === "script" ? new AstScriptSegment(block[1]) : new AstSegment(block[1]);
-            this.kind = "block";
+        /* block */ {
+            if (block.length == 2) {
+                const content = header.key === "script" ? new AstScriptSegment(block[1]) : new AstSegment(block[1]);
+                this.kind = "block";
+                this.data = {
+                    header: header,
+                    content: content
+                };
+                return;
+            }
+        }
+        /* element */ {
+            const value = new AstValue(header.key, null, code);
+            this.kind = "element";
             this.data = {
-                header: header,
-                content: content
+                value: value,
+                header: header
             };
             return;
         }
-        const value = new AstValue(header.key, null, code);
-        this.kind = "element";
-        this.data = {
-            value: value,
-            header: header
-        };
-        return;
     }
     solve(frame, last, inData) {
         frame ??= Frame.zero();
         let data = {};
         const headerData = this.data.header.getData();
         if (this.data.content) {
+            if (headerData.key === "script")
+                return;
             let extData = undefined;
             if (headerData.key === "frame") {
                 const Axes = [];
@@ -330,17 +336,22 @@ class AstAttribute {
     parse(code) {
         const tokens = splitKey(code);
 
-        if (tokens.length == 2) {
-            this.kind = "key";
-            this.key = tokens[0].trim();
-            this.value = new AstValue(tokens[1], null, code);
-            return;
+        /* key */ {
+            if (tokens.length == 2) {
+                this.kind = "key";
+                this.key = tokens[0].trim();
+                this.value = new AstValue(tokens[1], null, code);
+                return;
+            }
         }
-        if (/^[A-Za-z0-9_]+$/.test(code)) {
-            this.kind = "flag";
-            this.data = code;
-            return;
+        /* flag */ {
+            if (/^[A-Za-z0-9_]+$/.test(code)) {
+                this.kind = "flag";
+                this.data = code;
+                return;
+            }
         }
+
         throw Error("Unknown attribute syntax: " + code);
     }
     stringify() {
@@ -359,25 +370,47 @@ class AstValue {
         this.parse(code.trim());
     }
     parse(code) {
-        if (
-            (code[0] === "\"" && code[code.length-1] === "\"") || 
-            (code[0] === "'" && code[code.length-1] === "'") || 
-            (code[0] === "`" && code[code.length-1] === "`")
-        ) {
-            this.type = "str";
-            this.value = removeStr(code);
-            return;
+        /* string */ {
+            if (
+                (code[0] === "\"" && code[code.length-1] === "\"") || 
+                (code[0] === "'" && code[code.length-1] === "'") || 
+                (code[0] === "`" && code[code.length-1] === "`")
+            ) {
+                this.type = "str";
+                this.value = removeStr(code);
+                return;
+            }
         }
         
-        const num = Number(code.replace("%",""));
-        if (!isNaN(num)) {
-            if (code[code.length-1] == "%") {
-                this.type = "percentage";
-                this.value = num;
+        /* number / percentage */ {
+            const num = Number(code.replace("%",""));
+            if (!isNaN(num)) {
+                if (code[code.length-1] == "%") {
+                    this.type = "percentage";
+                    this.value = num;
+                    return;
+                } else {
+                    this.type = "num";
+                    this.value = num;
+                    return;
+                }
+            }
+        }
+
+        /* color */ {
+            if (code[0] == "#" && [4,7].includes(code.length)) {
+                this.type = "color";
+                this.value = code;
                 return;
-            } else {
-                this.type = "num";
-                this.value = num;
+            }
+        }
+        
+        /* property */ {
+            if (/\w+:\w+/.test(code)) {
+                const parts = code.match(/(\w+):(\w+)/);
+                this.type = "property";
+                this.source = parts[1];
+                this.name = parts[2];
                 return;
             }
         }
@@ -385,11 +418,13 @@ class AstValue {
         throw Error("Unknown value syntax: " + code);
     }
     stringify() {
-        return `Value<${this.type}>${this.value ?? "" !== "" ? `{${{
-            str: () => this.value,
+        if (this.type == "property") return `Property{source:${this.source},key:${this.name}}`;
+        return `Value<${this.type}>${this.value ?? "" !== "" ? `{${({
+            str: () => JSON.stringify(this.value),
             num: () => this.value.toString(),
             percentage: () => this.value.toString() + "%",
-        }[this.type]()}}` : ""}`;
+            color: () => this.value.toString()
+        }[this.type] ?? (()=>null))()}}` : ""}`;
     }
     format() {
         return this.value.toString();
@@ -507,7 +542,7 @@ class RWL {
 
         this.frame ??= data["frame"] ?? Frame.zero();
 
-        this.solved = this.solve(this.frame);
+        //this.solved = this.solve(this.frame);
     }
     stringify() {
         return `RWL{ast:${this.ast.stringify()}}`;
@@ -531,8 +566,45 @@ const code = `
 root {
     frame [Horizontal] {
         section [width=100] {
-          "hi"
+            "hi",
+            ":P"
+        },
+        section {
+            frame [Horizontal] {
+                section [width=50%] {
+                    frame [Vertical] {
+                        section [size=50%] {
+                        
+                        },
+                        section [size=50%] {
+                        
+                        },
+                        section [size=50%] {
+                        
+                        },
+                        section [size=50%] {
+                        
+                        },
+                        section {
+                        }
+                    }
+                },
+                section [width=25%] {
+                    "grah" [color=theme:text],
+                    "crazy" [anchor="tl"],
+                    "fr"
+                },
+                section [width=200] {
+                    "grah" [color=theme:text]
+                },
+                section {
+                    "sad" [color=#f00]
+                }
+            }
         }
+    },
+    script [type="osl"] {
+        log "hi"
     }
 }
 `
@@ -544,6 +616,6 @@ if (require.main === module) {
         frame: new Frame(new Vec2(-100,-100), new Vec2(100,100))
     })
     //console.log(rwl.ast.stringify());
-    console.log(JSON.stringify(rwl.getPanel(rwl.frame),null,"  "),JSON.stringify(rwl.ast,null,"  "));
+    console.log(/*JSON.stringify(rwl.getPanel(rwl.frame),null,"  "),*/JSON.stringify(rwl.ast,null,"  "), rwl.ast.stringify());
 }
 module.exports = { RWL, Frame, Vec2 }
